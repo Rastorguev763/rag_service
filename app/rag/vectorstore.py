@@ -115,6 +115,9 @@ class QdrantVectorStore:
     ) -> List[Tuple[str, float, Dict[str, Any]]]:
         """Поиск похожих документов"""
         try:
+            # Убеждаемся, что коллекция существует
+            await self._ensure_collection_exists()
+
             # Создаем фильтр если указан
             search_filter = None
             if filter_metadata:
