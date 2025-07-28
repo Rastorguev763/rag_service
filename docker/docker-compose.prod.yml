@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  # PostgreSQL база данных (продакшн)
+  postgres:
+    image: postgres:15-alpine
+    container_name: rag_postgres_prod
+    environment:
+      POSTGRES_DB: rag_service
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - rag_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag_service"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Qdrant векторная база данных (продакшн)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag_qdrant_prod
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # RAG Service (продакшн с масштабированием)
+  rag_service_prod:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    environment:
+      - DATABASE_URL=postgresql://rag_user:${POSTGRES_PASSWORD:-rag_password}@postgres:5432/rag_service
+      - QDRANT_URL=http://qdrant:6333
+      - DEBUG=False
+      - HOST=0.0.0.0
+      - PORT=8000
+    env_file:
+      - ../.env
+    volumes:
+      - ../logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - rag_network
+    deploy:
+      replicas: 2  # Масштабирование до 2 инстансов
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+
+  # Nginx для балансировки нагрузки
+  nginx:
+    image: nginx:alpine
+    container_name: rag_nginx_prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - rag_service_prod
+    networks:
+      - rag_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+
+  # Redis для кеширования
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis_prod
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Мониторинг с Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rag_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - rag_network
+    profiles:
+      - monitoring
+
+  # Grafana для визуализации
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rag_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - rag_network
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  rag_network:
+    driver: bridge 

@@ -1,0 +1,76 @@
+# Многоэтапная сборка для продакшена
+FROM python:3.12-slim as builder
+
+# Устанавливаем системные зависимости для сборки
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создаем виртуальное окружение
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Устанавливаем Poetry
+RUN pip install poetry
+
+# Копируем файлы зависимостей
+COPY pyproject.toml poetry.lock* ./
+
+# Устанавливаем зависимости в виртуальное окружение
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --only main --no-interaction --no-ansi
+RUN pip install gunicorn
+
+# Продакшн образ
+FROM python:3.12-slim
+
+# Устанавливаем системные зависимости для runtime
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Копируем виртуальное окружение
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Создаем пользователя для безопасности
+RUN useradd --create-home --shell /bin/bash app
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем исходный код
+COPY --chown=app:app . .
+
+# Создаем директории для логов и данных
+RUN mkdir -p logs && chown -R app:app /app
+
+# Копируем скрипт запуска
+COPY docker/start.sh /app/start.sh
+RUN chmod +x /app/start.sh && chown app:app /app/start.sh
+
+# Переключаемся на пользователя app
+USER app
+
+# Открываем порт
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/status/health || exit 1
+
+# Запуск с Gunicorn (4 воркера) через скрипт
+CMD ["/app/start.sh", "gunicorn", "app.main:app", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "4", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--worker-connections", "1000", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
+     "--timeout", "120", \
+     "--keep-alive", "5", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info"] 

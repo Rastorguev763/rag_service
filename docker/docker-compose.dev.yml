@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # PostgreSQL база данных
+  postgres:
+    image: postgres:15-alpine
+    container_name: rag_postgres_dev
+    environment:
+      POSTGRES_DB: rag_service
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - rag_network
+
+  # Qdrant векторная база данных
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag_qdrant_dev
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag_network
+
+  # RAG Service (разработка)
+  rag_service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: rag_service_dev
+    environment:
+      - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_service
+      - QDRANT_URL=http://qdrant:6333
+      - DEBUG=True
+      - HOST=0.0.0.0
+      - PORT=8000
+    env_file:
+      - ../.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../logs:/app/logs
+      - ..:/app
+    depends_on:
+      - postgres
+      - qdrant
+    networks:
+      - rag_network
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
+networks:
+  rag_network:
+    driver: bridge 
