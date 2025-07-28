@@ -93,6 +93,10 @@ async def chat_with_rag(
 
         # Получаем историю сообщений для контекста
         conversation_history = []
+
+        # Явно загружаем сообщения сессии
+        await db.refresh(session, attribute_names=["messages"])
+
         if session.messages:
             for msg in session.messages[-10:]:  # Последние 10 сообщений
                 conversation_history.append({"role": msg.role, "content": msg.content})
@@ -141,6 +145,10 @@ async def get_chat_sessions(
         )
         sessions = result.scalars().all()
 
+        # Явно загружаем связанные данные для каждого объекта
+        for session in sessions:
+            await db.refresh(session, attribute_names=["messages"])
+
         return sessions
 
     except Exception as e:
@@ -173,6 +181,10 @@ async def get_chat_messages(
             select(ChatMessage).filter(ChatMessage.session_id == session_id)
         )
         messages = result.scalars().all()
+
+        # Явно загружаем связанные данные для каждого сообщения
+        for message in messages:
+            await db.refresh(message, attribute_names=["session"])
 
         return messages
 

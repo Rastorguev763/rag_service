@@ -130,7 +130,7 @@ class QdrantVectorStore:
             # Выполняем поиск
             search_result = await self.client.search(
                 collection_name=self.collection_name,
-                query_vector=query,  # Ожидается список float
+                query_vector=query,
                 limit=k,
                 query_filter=search_filter,
                 with_payload=True,

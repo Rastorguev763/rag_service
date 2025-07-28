@@ -37,7 +37,7 @@ class EmbeddingModel:
     def encode_single(self, text: str) -> List[float]:
         """Создание эмбеддинга для одного текста"""
         embedding = self.encode(text)
-        return embedding.tolist()
+        return embedding[0].tolist()
 
     def get_dimension(self) -> int:
         """Получение размерности эмбеддингов"""

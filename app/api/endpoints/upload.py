@@ -119,12 +119,19 @@ async def upload_file_document(
 
 @router.get("/documents", response_model=List[DocumentSchema])
 async def get_user_documents(
-    current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_async_db)
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Получение списка документов пользователя"""
     try:
-        result = await db.execute(select(Document).filter(Document.owner_id == current_user.id))
+        result = await db.execute(
+            select(Document).filter(Document.owner_id == current_user.id)
+        )
         documents = result.scalars().all()
+
+        # Явно загружаем связанные данные для каждого документа
+        for document in documents:
+            await db.refresh(document, attribute_names=["owner", "chunks"])
 
         return documents
 
@@ -141,13 +148,20 @@ async def get_document(
 ):
     """Получение конкретного документа"""
     try:
-        result = await db.execute(select(Document).filter(Document.id == document_id, Document.owner_id == current_user.id))
+        result = await db.execute(
+            select(Document).filter(
+                Document.id == document_id, Document.owner_id == current_user.id
+            )
+        )
         document = result.scalar_one_or_none()
 
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
             )
+
+        # Явно загружаем связанные данные
+        await db.refresh(document, attribute_names=["owner", "chunks"])
 
         return document
 
