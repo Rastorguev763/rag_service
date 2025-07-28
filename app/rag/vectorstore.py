@@ -1,7 +1,7 @@
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -26,16 +26,15 @@ class QdrantVectorStore:
             "ignore", message="Api key is used with an insecure connection"
         )
 
-        self.client = QdrantClient(
+        self.client = AsyncQdrantClient(
             url=settings.qdrant_url, api_key=settings.qdrant_api_key
         )
         self.collection_name = settings.collection_name
-        self._ensure_collection_exists()
 
-    def _ensure_collection_exists(self):
+    async def _ensure_collection_exists(self):
         """Проверка и создание коллекции если не существует"""
         try:
-            collections = self.client.get_collections()
+            collections = await self.client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
             if self.collection_name not in collection_names:
@@ -46,7 +45,7 @@ class QdrantVectorStore:
                 embedding_model = get_embedding_model()
                 dimension = embedding_model.get_dimension()
 
-                self.client.create_collection(
+                await self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
                         size=dimension, distance=Distance.COSINE
@@ -60,7 +59,7 @@ class QdrantVectorStore:
             logger.error(f"Ошибка при создании коллекции: {e}")
             raise
 
-    def add_texts(
+    async def add_texts(
         self,
         texts: List[str],
         metadatas: Optional[List[Dict[str, Any]]] = None,
@@ -69,6 +68,8 @@ class QdrantVectorStore:
     ) -> List[str]:
         """Добавление текстов в векторную базу"""
         try:
+            await self._ensure_collection_exists()
+
             if ids is None:
                 ids = [str(uuid.uuid4()) for _ in texts]
 
@@ -78,6 +79,7 @@ class QdrantVectorStore:
             # Создаем эмбеддинги для текстов если не переданы
             if embeddings is None:
                 from app.rag.embedding import get_embedding_model
+
                 embedding_model = get_embedding_model()
                 embeddings = embedding_model.encode(texts)
 
@@ -94,7 +96,9 @@ class QdrantVectorStore:
                 points.append(point)
 
             # Добавляем точки в коллекцию
-            self.client.upsert(collection_name=self.collection_name, points=points)
+            await self.client.upsert(
+                collection_name=self.collection_name, points=points
+            )
 
             logger.info(f"Добавлено {len(points)} точек в коллекцию")
             return ids
@@ -103,7 +107,7 @@ class QdrantVectorStore:
             logger.error(f"Ошибка при добавлении текстов: {e}")
             raise
 
-    def similarity_search(
+    async def similarity_search(
         self,
         query: List[float],
         k: int = 5,
@@ -124,7 +128,7 @@ class QdrantVectorStore:
                 search_filter = Filter(must=conditions)
 
             # Выполняем поиск
-            search_result = self.client.search(
+            search_result = await self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query,  # Ожидается список float
                 limit=k,
@@ -147,10 +151,10 @@ class QdrantVectorStore:
             logger.error(f"Ошибка при поиске: {e}")
             raise
 
-    def delete_texts(self, ids: List[str]) -> bool:
+    async def delete_texts(self, ids: List[str]) -> bool:
         """Удаление текстов по ID"""
         try:
-            self.client.delete(
+            await self.client.delete(
                 collection_name=self.collection_name, points_selector=ids
             )
             logger.info(f"Удалено {len(ids)} точек из коллекции")
@@ -160,10 +164,10 @@ class QdrantVectorStore:
             logger.error(f"Ошибка при удалении текстов: {e}")
             raise
 
-    def get_collection_info(self) -> Dict[str, Any]:
+    async def get_collection_info(self) -> Dict[str, Any]:
         """Получение информации о коллекции"""
         try:
-            info = self.client.get_collection(self.collection_name)
+            info = await self.client.get_collection(self.collection_name)
             return {
                 "name": self.collection_name,
                 "vectors_count": info.vectors_count,
@@ -174,11 +178,11 @@ class QdrantVectorStore:
             logger.error(f"Ошибка при получении информации о коллекции: {e}")
             raise
 
-    def clear_collection(self) -> bool:
+    async def clear_collection(self) -> bool:
         """Очистка коллекции"""
         try:
-            self.client.delete_collection(self.collection_name)
-            self._ensure_collection_exists()
+            await self.client.delete_collection(self.collection_name)
+            await self._ensure_collection_exists()
             logger.info(f"Коллекция {self.collection_name} очищена")
             return True
         except Exception as e:

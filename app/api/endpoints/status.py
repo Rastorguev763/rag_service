@@ -36,7 +36,7 @@ async def health_check(rag_service: RAGService = Depends(get_rag_service)):
     try:
         # Проверяем подключение к Qdrant
         try:
-            rag_service.vector_store.get_collection_info()
+            await rag_service.vector_store.get_collection_info()
             qdrant_healthy = True
         except Exception:
             qdrant_healthy = False

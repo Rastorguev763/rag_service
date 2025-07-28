@@ -74,7 +74,7 @@ async def chat_with_rag(
         sources = None
         if request.use_rag and rag_service:
             # Ищем похожие документы
-            similar_docs = rag_service.search_similar(
+            similar_docs = await rag_service.search_similar(
                 query=request.message, k=3, user_id=current_user.id
             )
 

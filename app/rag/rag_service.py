@@ -62,7 +62,7 @@ class RAGService:
                 metadatas.append(metadata)
 
             # Добавляем в векторную базу
-            chunk_ids = self.vector_store.add_texts(
+            chunk_ids = await self.vector_store.add_texts(
                 texts=chunks, metadatas=metadatas, embeddings=embeddings.tolist()
             )
 
@@ -88,7 +88,7 @@ class RAGService:
             await db.rollback()
             raise
 
-    def search_similar(
+    async def search_similar(
         self, query: str, k: int = 5, user_id: Optional[int] = None
     ) -> List[Tuple[str, float, Dict[str, Any]]]:
         """Поиск похожих документов"""
@@ -102,7 +102,7 @@ class RAGService:
                 filter_metadata = {"user_id": user_id}
 
             # Ищем похожие документы
-            results = self.vector_store.similarity_search(
+            results = await self.vector_store.similarity_search(
                 query=query_embedding, k=k, filter_metadata=filter_metadata
             )
 
@@ -129,7 +129,7 @@ class RAGService:
             total_chunks = len(result.scalars().all())
 
             # Статистика из Qdrant
-            collection_info = self.vector_store.get_collection_info()
+            collection_info = await self.vector_store.get_collection_info()
             collection_size = collection_info.get("points_count", 0)
 
             # Проверка здоровья системы
@@ -177,7 +177,7 @@ class RAGService:
 
             # Удаляем из векторной базы
             if chunk_ids:
-                self.vector_store.delete_texts(chunk_ids)
+                await self.vector_store.delete_texts(chunk_ids)
 
             # Удаляем из БД
             await db.delete(document)
