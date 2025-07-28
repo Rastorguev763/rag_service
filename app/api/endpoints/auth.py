@@ -3,7 +3,8 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.utils.auth import (
     authenticate_user,
@@ -11,7 +12,7 @@ from app.utils.auth import (
     get_current_active_user,
 )
 from app.config.config import settings
-from app.db.database import get_db
+from app.db.database import get_async_db
 from app.utils.logger import logger
 from app.models.models import User
 from app.schemas.schemas import Token
@@ -23,11 +24,11 @@ router = APIRouter()
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_async_db)
 ):
     """Получение JWT токена для аутентификации"""
     try:
-        user = authenticate_user(db, form_data.username, form_data.password)
+        user = await authenticate_user(db, form_data.username, form_data.password)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -49,22 +50,22 @@ async def login_for_access_token(
 
 
 @router.post("/register", response_model=UserSchema)
-async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_async_db)):
     """Регистрация нового пользователя"""
     try:
         from app.utils.auth import get_password_hash
 
         # Проверяем, что пользователь не существует
-        existing_user = (
-            db.query(User).filter(User.username == user_data.username).first()
-        )
+        result = await db.execute(select(User).filter(User.username == user_data.username))
+        existing_user = result.scalar_one_or_none()
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already registered",
             )
 
-        existing_email = db.query(User).filter(User.email == user_data.email).first()
+        result = await db.execute(select(User).filter(User.email == user_data.email))
+        existing_email = result.scalar_one_or_none()
         if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -80,15 +81,15 @@ async def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         )
 
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
 
         logger.info(f"Зарегистрирован новый пользователь: {user.username}")
         return user
 
     except Exception as e:
         logger.error(f"Ошибка регистрации: {e}")
-        db.rollback()
+        await db.rollback()
         raise
 
 

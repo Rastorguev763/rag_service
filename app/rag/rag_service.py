@@ -1,7 +1,8 @@
 from datetime import datetime, UTC
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.utils.logger import logger
 from app.models.models import Document, DocumentChunk, User
@@ -19,8 +20,8 @@ class RAGService:
         self.vector_store = get_vector_store()
         self.text_splitter = get_text_splitter()
 
-    def process_document(
-        self, db: Session, document_data: DocumentCreate, user: User
+    async def process_document(
+        self, db: AsyncSession, document_data: DocumentCreate, user: User
     ) -> Document:
         """Обработка документа и добавление в RAG"""
         try:
@@ -38,8 +39,8 @@ class RAGService:
                 is_processed=False,
             )
             db.add(document)
-            db.commit()
-            db.refresh(document)
+            await db.commit()
+            await db.refresh(document)
 
             # Разбиваем текст на чанки
             chunks = self.text_splitter.split_text(document_data.content)
@@ -77,14 +78,14 @@ class RAGService:
 
             # Обновляем статус документа
             document.is_processed = True
-            db.commit()
+            await db.commit()
 
             logger.info(f"Документ {document.id} успешно обработан")
             return document
 
         except Exception as e:
             logger.error(f"Ошибка при обработке документа: {e}")
-            db.rollback()
+            await db.rollback()
             raise
 
     def search_similar(
@@ -112,15 +113,20 @@ class RAGService:
             logger.error(f"Ошибка при поиске: {e}")
             raise
 
-    def get_rag_status(self, db: Session) -> RAGStatus:
+    async def get_rag_status(self, db: AsyncSession) -> RAGStatus:
         """Получение статуса RAG системы"""
         try:
             # Статистика из PostgreSQL
-            total_documents = db.query(Document).count()
-            processed_documents = (
-                db.query(Document).filter(Document.is_processed.is_(True)).count()
+            result = await db.execute(select(Document))
+            total_documents = len(result.scalars().all())
+
+            result = await db.execute(
+                select(Document).filter(Document.is_processed.is_(True))
             )
-            total_chunks = db.query(DocumentChunk).count()
+            processed_documents = len(result.scalars().all())
+
+            result = await db.execute(select(DocumentChunk))
+            total_chunks = len(result.scalars().all())
 
             # Статистика из Qdrant
             collection_info = self.vector_store.get_collection_info()
@@ -147,15 +153,18 @@ class RAGService:
             logger.error(f"Ошибка при получении статуса RAG: {e}")
             raise
 
-    def delete_document(self, db: Session, document_id: int, user: User) -> bool:
+    async def delete_document(
+        self, db: AsyncSession, document_id: int, user: User
+    ) -> bool:
         """Удаление документа из RAG"""
         try:
             # Получаем документ
-            document = (
-                db.query(Document)
-                .filter(Document.id == document_id, Document.owner_id == user.id)
-                .first()
+            result = await db.execute(
+                select(Document).filter(
+                    Document.id == document_id, Document.owner_id == user.id
+                )
             )
+            document = result.scalar_one_or_none()
 
             if not document:
                 logger.warning(f"Документ {document_id} не найден")
@@ -171,15 +180,15 @@ class RAGService:
                 self.vector_store.delete_texts(chunk_ids)
 
             # Удаляем из БД
-            db.delete(document)
-            db.commit()
+            await db.delete(document)
+            await db.commit()
 
             logger.info(f"Документ {document_id} удален")
             return True
 
         except Exception as e:
             logger.error(f"Ошибка при удалении документа: {e}")
-            db.rollback()
+            await db.rollback()
             raise
 
 

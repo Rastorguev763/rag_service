@@ -6,11 +6,18 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Database settings
     database_url: str = "postgresql://user:password@localhost:5432/rag_service"
+    database_url_async: str = "postgresql+asyncpg://user:password@localhost:5432/rag_service"
     postgres_db: str = "rag_service"
     postgres_user: str = "rag_user"
     postgres_password: str = "rag_password"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: Optional[str] = None
+
+    # Database pool settings
+    db_echo: bool = False
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout: int = 30
 
     # OpenRouter settings
     openrouter_api_key: str

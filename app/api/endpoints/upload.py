@@ -2,12 +2,13 @@ import os
 from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.utils.auth import get_current_active_user
-from app.db.database import get_db
+from app.db.database import get_async_db
 from app.utils.logger import logger
-from app.models.models import User
+from app.models.models import User, Document
 from app.rag.rag_service import get_rag_service
 from app.schemas.schemas import Document as DocumentSchema
 from app.schemas.schemas import DocumentCreate, UploadResponse
@@ -19,14 +20,14 @@ router = APIRouter()
 async def upload_text_document(
     document_data: DocumentCreate,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Загрузка текстового документа в RAG"""
     try:
         rag_service = get_rag_service()
 
         # Обрабатываем документ
-        document = rag_service.process_document(
+        document = await rag_service.process_document(
             db=db, document_data=document_data, user=current_user
         )
 
@@ -53,7 +54,7 @@ async def upload_file_document(
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Загрузка файла в RAG"""
     try:
@@ -96,7 +97,7 @@ async def upload_file_document(
 
         # Обрабатываем документ
         rag_service = get_rag_service()
-        document = rag_service.process_document(
+        document = await rag_service.process_document(
             db=db, document_data=document_data, user=current_user
         )
 
@@ -118,18 +119,12 @@ async def upload_file_document(
 
 @router.get("/documents", response_model=List[DocumentSchema])
 async def get_user_documents(
-    current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_async_db)
 ):
     """Получение списка документов пользователя"""
     try:
-        from app.models.models import Document
-
-        documents = (
-            db.query(Document)
-            .filter(Document.owner_id == current_user.id)
-            .order_by(Document.created_at.desc())
-            .all()
-        )
+        result = await db.execute(select(Document).filter(Document.owner_id == current_user.id))
+        documents = result.scalars().all()
 
         return documents
 
@@ -142,17 +137,12 @@ async def get_user_documents(
 async def get_document(
     document_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Получение конкретного документа"""
     try:
-        from app.models.models import Document
-
-        document = (
-            db.query(Document)
-            .filter(Document.id == document_id, Document.owner_id == current_user.id)
-            .first()
-        )
+        result = await db.execute(select(Document).filter(Document.id == document_id, Document.owner_id == current_user.id))
+        document = result.scalar_one_or_none()
 
         if not document:
             raise HTTPException(
@@ -170,13 +160,13 @@ async def get_document(
 async def delete_document(
     document_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Удаление документа"""
     try:
         rag_service = get_rag_service()
 
-        success = rag_service.delete_document(
+        success = await rag_service.delete_document(
             db=db, document_id=document_id, user=current_user
         )
 

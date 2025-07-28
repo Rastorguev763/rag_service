@@ -2,10 +2,11 @@ import traceback
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.utils.auth import get_current_active_user
-from app.db.database import get_db
+from app.db.database import get_async_db
 from app.utils.logger import logger
 from app.models.models import ChatMessage, ChatSession, User
 from app.rag.llm import get_llm
@@ -21,7 +22,7 @@ router = APIRouter()
 async def chat_with_rag(
     request: ChatRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Основной endpoint для чата с RAG"""
     try:
@@ -34,14 +35,13 @@ async def chat_with_rag(
 
         # Получаем или создаем сессию чата
         if request.session_id:
-            session = (
-                db.query(ChatSession)
-                .filter(
+            result = await db.execute(
+                select(ChatSession).filter(
                     ChatSession.id == request.session_id,
                     ChatSession.user_id == current_user.id,
                 )
-                .first()
             )
+            session = result.scalar_one_or_none()
             if not session:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -58,16 +58,16 @@ async def chat_with_rag(
                 user_id=current_user.id,
             )
             db.add(session)
-            db.commit()
-            db.refresh(session)
+            await db.commit()
+            await db.refresh(session)
 
         # Сохраняем сообщение пользователя
         user_message = ChatMessage(
             content=request.message, role="user", session_id=session.id
         )
         db.add(user_message)
-        db.commit()
-        db.refresh(user_message)
+        await db.commit()
+        await db.refresh(user_message)
 
         # Получаем контекст если используется RAG
         context = None
@@ -111,8 +111,8 @@ async def chat_with_rag(
             content=response_text, role="assistant", session_id=session.id
         )
         db.add(assistant_message)
-        db.commit()
-        db.refresh(assistant_message)
+        await db.commit()
+        await db.refresh(assistant_message)
 
         logger.info(f"Сгенерирован ответ для пользователя {current_user.username}")
 
@@ -131,16 +131,15 @@ async def chat_with_rag(
 
 @router.get("/sessions", response_model=List[ChatSessionSchema])
 async def get_chat_sessions(
-    current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Получение списка сессий чата пользователя"""
     try:
-        sessions = (
-            db.query(ChatSession)
-            .filter(ChatSession.user_id == current_user.id)
-            .order_by(ChatSession.updated_at.desc())
-            .all()
+        result = await db.execute(
+            select(ChatSession).filter(ChatSession.user_id == current_user.id)
         )
+        sessions = result.scalars().all()
 
         return sessions
 
@@ -153,30 +152,27 @@ async def get_chat_sessions(
 async def get_chat_messages(
     session_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Получение сообщений конкретной сессии"""
     try:
         # Проверяем права доступа
-        session = (
-            db.query(ChatSession)
-            .filter(
+        result = await db.execute(
+            select(ChatSession).filter(
                 ChatSession.id == session_id, ChatSession.user_id == current_user.id
             )
-            .first()
         )
+        session = result.scalar_one_or_none()
 
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found"
             )
 
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.asc())
-            .all()
+        result = await db.execute(
+            select(ChatMessage).filter(ChatMessage.session_id == session_id)
         )
+        messages = result.scalars().all()
 
         return messages
 
@@ -189,17 +185,16 @@ async def get_chat_messages(
 async def delete_chat_session(
     session_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Удаление сессии чата"""
     try:
-        session = (
-            db.query(ChatSession)
-            .filter(
+        result = await db.execute(
+            select(ChatSession).filter(
                 ChatSession.id == session_id, ChatSession.user_id == current_user.id
             )
-            .first()
         )
+        session = result.scalar_one_or_none()
 
         if not session:
             raise HTTPException(
@@ -207,16 +202,20 @@ async def delete_chat_session(
             )
 
         # Удаляем все сообщения сессии
-        db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+        from sqlalchemy import delete
+
+        await db.execute(
+            delete(ChatMessage).filter(ChatMessage.session_id == session_id)
+        )
 
         # Удаляем сессию
-        db.delete(session)
-        db.commit()
+        await db.delete(session)
+        await db.commit()
 
         logger.info(f"Удалена сессия чата {session_id}")
         return {"message": "Chat session deleted"}
 
     except Exception as e:
         logger.error(f"Ошибка при удалении сессии: {e}")
-        db.rollback()
+        await db.rollback()
         raise

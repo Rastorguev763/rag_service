@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.auth import get_current_active_user
-from app.db.database import get_db
+from app.db.database import get_async_db
 from app.utils.logger import logger
 from app.models.models import User
 from app.rag.rag_service import RAGService, get_rag_service
@@ -15,12 +15,12 @@ router = APIRouter()
 @router.get("/status", response_model=RAGStatus)
 async def get_rag_status(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     rag_service: RAGService = Depends(get_rag_service),
 ):
     """Получение статуса RAG системы"""
     try:
-        status_info = rag_service.get_rag_status(db)
+        status_info = await rag_service.get_rag_status(db)
 
         logger.info(f"Статус RAG запрошен пользователем {current_user.username}")
         return status_info
