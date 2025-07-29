@@ -9,7 +9,7 @@ from app.utils.auth import get_current_active_user
 from app.db.database import get_async_db
 from app.utils.logger import logger
 from app.models.models import ChatMessage, ChatSession, User
-from app.rag.llm import get_llm
+from app.rag.llm import OpenRouterLLM, get_llm
 from app.rag.rag_service import get_rag_service
 from app.schemas.schemas import ChatMessage as ChatMessageSchema
 from app.schemas.schemas import ChatRequest, ChatResponse
@@ -23,11 +23,10 @@ async def chat_with_rag(
     request: ChatRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_async_db),
+    llm: OpenRouterLLM = Depends(get_llm),
 ):
     """Основной endpoint для чата с RAG"""
     try:
-        llm = get_llm()
-
         # Инициализируем RAG сервис только если он нужен
         rag_service = None
         if request.use_rag:
@@ -102,7 +101,7 @@ async def chat_with_rag(
                 conversation_history.append({"role": msg.role, "content": msg.content})
 
         # Генерируем ответ
-        response_text = llm.chat_completion(
+        response_text = await llm.chat_completion(
             user_message=request.message,
             conversation_history=conversation_history,
             use_rag=request.use_rag,

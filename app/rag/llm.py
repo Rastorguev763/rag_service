@@ -1,22 +1,22 @@
 from typing import Dict, List, Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.config.config import settings
 from app.utils.logger import logger
 
 
 class OpenRouterLLM:
-    """Класс для работы с LLM через OpenRouter"""
+    """Класс для работы с LLM через OpenRouter (асинхронная версия)"""
 
     def __init__(self):
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=settings.openrouter_api_key, base_url=settings.openrouter_base_url
         )
         self.default_model = "qwen/qwen3-235b-a22b-2507:free"
-        logger.info("Инициализирован OpenRouter клиент")
+        logger.info("Инициализирован асинхронный OpenRouter клиент")
 
-    def generate_response(
+    async def generate_response(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
@@ -25,23 +25,27 @@ class OpenRouterLLM:
         use_rag: bool = True,
         context: Optional[str] = None,
     ) -> str:
-        """Генерация ответа от LLM"""
+        """Генерация ответа от LLM (асинхронно)"""
         try:
             # Формируем промпт с контекстом если используется RAG
             if use_rag and context:
                 system_message = {
                     "role": "system",
-                    "content": f"""Ты полезный ассистент. Используй следующую информацию для ответа на вопрос пользователя:
+                    "content": (
+                        f"""
+                        Ты полезный ассистент. Используй следующую информацию для ответа на вопрос пользователя:
 
-Контекст:
-{context}
+                        Контекст:
+                        {context}
 
-Отвечай на основе предоставленного контекста. Если в контексте нет информации для ответа, скажи об этом честно.""",
+                        Отвечай на основе предоставленного контекста. Если в контексте нет информации для ответа, скажи об этом честно.
+                        """
+                    ),
                 }
                 messages = [system_message] + messages
 
-            # Выполняем запрос к LLM
-            response = self.client.chat.completions.create(
+            # Выполняем асинхронный запрос к LLM
+            response = await self.client.chat.completions.create(
                 model=model or self.default_model,
                 messages=messages,
                 max_tokens=max_tokens,
@@ -56,7 +60,7 @@ class OpenRouterLLM:
             logger.error(f"Ошибка при генерации ответа: {e}")
             raise
 
-    def chat_completion(
+    async def chat_completion(
         self,
         user_message: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
@@ -64,15 +68,14 @@ class OpenRouterLLM:
         context: Optional[str] = None,
         **kwargs,
     ) -> str:
-        """Удобный метод для чат-комплектации"""
+        """Удобный метод для чат-комплектации (асинхронно)"""
         messages = conversation_history or []
         messages.append({"role": "user", "content": user_message})
 
-        return self.generate_response(
+        return await self.generate_response(
             messages=messages, use_rag=use_rag, context=context, **kwargs
         )
 
 
 def get_llm() -> OpenRouterLLM:
-    """Получение глобального экземпляра LLM"""
     return OpenRouterLLM()
