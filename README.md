@@ -6,23 +6,24 @@ RAG (Retrieval-Augmented Generation) сервис с использование�
 
 - **RAG система** с векторным поиском на основе Qdrant
 - **Русские эмбеддинги** с использованием модели ai-forever/FRIDA
-- **LLM интеграция** через OpenRouter (Claude, GPT и др.)
+- **LLM интеграция** через OpenRouter (DeepSeek, Claude, GPT и др.)
 - **Аутентификация** с JWT токенами
 - **Управление документами** с загрузкой файлов
 - **Чат с контекстом** и историей сообщений
 - **Настраиваемое количество точек контекста** (k_points) для оптимизации качества ответов
 - **REST API** с автоматической документацией
+- **Docker Compose** для простого развертывания
 
 ## 🛠 Технологический стек
 
-- **Backend**: FastAPI (Python 3.11+)
+- **Backend**: FastAPI (Python 3.12+)
 - **База данных**: PostgreSQL (пользователи, документы)
 - **Векторная БД**: Qdrant
-- **LLM**: OpenRouter (Claude, GPT, и др.)
+- **LLM**: OpenRouter (DeepSeek R1, Claude, GPT, и др.)
 - **Эмбеддинги**: ai-forever/FRIDA
-- **Валидация**: Pydantic
+- **Валидация**: Pydantic v2
 - **Логирование**: Loguru
-- **Управление пакетами**: Poetry
+- **Контейнеризация**: Docker & Docker Compose
 
 ## 🤖 Модель эмбеддингов ai-forever/FRIDA
 
@@ -45,53 +46,66 @@ RAG (Retrieval-Augmented Generation) сервис с использование�
 
 ### Минимальные требования
 
-- Python 3.11+
-- PostgreSQL
-- Qdrant
+- Docker Engine 20.10+
+- Docker Compose 2.0+
 - OpenRouter API ключ
 - **Минимум 8GB RAM** (для модели ai-forever/FRIDA)
 - **Рекомендуется 16GB+ RAM** для стабильной работы
+- **SSD диск** для быстрой работы векторной БД
 
-### Для Docker развертывания
+## 🚀 Быстрый старт
 
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- **Минимум 4GB RAM** для контейнеров
-- **Рекомендуется 8GB+ RAM** для продакшена
-
-## 🔧 Установка
-
-### 1. Клонирование репозитория
+### 1. Клонирование и настройка
 
 ```bash
 git clone <repository-url>
 cd rag-service
-```
-
-### 2. Установка зависимостей
-
-```bash
-# Установка Poetry (если не установлен)
-curl -sSL https://install.python-poetry.org | python3 -
-
-# Установка зависимостей
-poetry install
-```
-
-### 3. Настройка окружения
-
-Скопируйте файл с переменными окружения:
-
-```bash
 cp env.example .env
 ```
 
-Отредактируйте `.env` файл:
+### 2. Настройка API ключей
+
+Отредактируйте `.env` файл и добавьте ваш OpenRouter API ключ:
+
+```env
+# OpenRouter settings
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# JWT settings  
+SECRET_KEY=your_secret_key_here_make_it_long_and_random
+```
+
+### 3. Запуск сервисов
+
+```bash
+# Разработка
+docker compose -f docker/docker-compose.dev.yml up -d
+
+# Или продакшн
+docker compose -f docker/docker-compose.prod.yml up -d
+```
+
+### 4. Проверка работы
+
+- API документация: <http://localhost:8000/docs>
+- Health check: <http://localhost:8000/status/health>
+
+## 🔧 Подробная установка
+
+### Настройка окружения
+
+Полная конфигурация `.env` файла:
 
 ```env
 # Database settings
-DATABASE_URL=postgresql://user:password@localhost:5432/rag_service
-QDRANT_URL=http://localhost:6333
+DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_service
+DATABASE_URL_ASYNC=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_service
+POSTGRES_DB=rag_service
+POSTGRES_USER=rag_user
+POSTGRES_PASSWORD=rag_password
+
+# Qdrant settings
+QDRANT_URL=http://qdrant:6333
 QDRANT_API_KEY=your_qdrant_api_key
 
 # OpenRouter settings
@@ -104,7 +118,6 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
 # App settings
-DEBUG=True
 HOST=0.0.0.0
 PORT=8000
 
@@ -117,60 +130,12 @@ EMBEDDING_MODEL=ai-forever/FRIDA
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
 COLLECTION_NAME=documents
-```
-
-### 4. Настройка базы данных
-
-```bash
-# Создание базы данных PostgreSQL
-createdb rag_service
-
-# Применение миграций (если используете Alembic)
-alembic upgrade head
-```
-
-### 5. Запуск Qdrant
-
-```bash
-# Через Docker (рекомендуется)
-docker run -d -p 6333:6333 --name qdrant qdrant/qdrant
-
-# Или установите локально
-# https://qdrant.tech/documentation/guides/installation/
-```
-
-### 6. Docker развертывание (альтернатива)
-
-Если у вас установлен Docker, можно использовать готовые конфигурации:
-
-```bash
-# Клонирование и настройка
-git clone <repository-url>
-cd rag-service
-
-# Создание .env файла
-cp env.example .env
-# Отредактируйте .env файл
-
-# Запуск через Docker
-docker-compose --profile dev up -d
+DEFAULT_K_POINTS=3
 ```
 
 ## 🚀 Запуск
 
 ### Разработка
-
-#### Локальный запуск
-
-```bash
-# Активация виртуального окружения
-poetry shell
-
-# Запуск сервера
-python -m app.main
-```
-
-#### Docker (рекомендуется)
 
 ```bash
 # Запуск всех сервисов для разработки
@@ -185,8 +150,6 @@ docker compose -f docker/docker-compose.dev.yml down
 
 ### Продакшн
 
-#### Docker Compose
-
 ```bash
 # Запуск продакшн версии
 docker compose -f docker/docker-compose.prod.yml up -d
@@ -198,15 +161,15 @@ docker compose -f docker/docker-compose.prod.yml -f docker/docker-compose.monito
 docker compose -f docker/docker-compose.prod.yml exec rag_service_prod alembic upgrade head
 ```
 
-#### Ручной запуск
+### Доступ к сервисам
 
-```bash
-# Через uvicorn
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+После запуска сервисы будут доступны по следующим адресам:
 
-# Через gunicorn
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
-```
+- **RAG API**: <http://localhost:8000>
+- **API документация**: <http://localhost:8000/docs>
+- **Qdrant UI** (dev): <http://localhost:6334>
+- **Grafana** (мониторинг): <http://localhost:3000>
+- **Prometheus** (метрики): <http://localhost:9090>
 
 ## 📚 API Endpoints
 
@@ -302,16 +265,6 @@ curl -X POST "http://localhost:8000/chat/chat" \
 - `max_tokens` - максимальное количество токенов в ответе
 - `session_id` - ID сессии чата (опционально)
 
-## 🧪 Тестирование
-
-```bash
-# Запуск тестов
-poetry run pytest
-
-# Запуск с покрытием
-poetry run pytest --cov=app
-```
-
 ## 📊 Мониторинг
 
 ### Базовый мониторинг
@@ -320,7 +273,7 @@ poetry run pytest --cov=app
 - Автоматическая ротация логов (10MB, 7 дней)
 - Health check endpoint для мониторинга
 
-### Продвинутый мониторинг (Docker)
+### Продвинутый мониторинг
 
 ```bash
 # Запуск с мониторингом
@@ -339,35 +292,35 @@ docker compose -f docker/docker-compose.prod.yml -f docker/docker-compose.monito
 
 - Grafana: <http://localhost:3000> (admin/admin123)
 - Prometheus: <http://localhost:9090>
-- Qdrant UI: <http://localhost:6334> (в dev режиме)
 
 ## 🔧 Конфигурация
 
 ### Основные настройки
 
-Основные настройки в `app/config.py`:
+Основные настройки в `app/config/config.py`:
 
 - Размер чанков: `CHUNK_SIZE=1000`
 - Перекрытие чанков: `CHUNK_OVERLAP=200`
 - Модель эмбеддингов: `EMBEDDING_MODEL=ai-forever/FRIDA`
-- LLM модель: `anthropic/claude-3-sonnet:20240229`
+- LLM модель: `deepseek/deepseek-r1-0528:free`
+- Количество точек по умолчанию: `DEFAULT_K_POINTS=3`
 
 ### Docker конфигурации
 
 Проект включает несколько Docker Compose конфигураций:
 
-- **`docker-compose.dev.yml`** - для разработки с дополнительными сервисами
-- **`docker-compose.prod.yml`** - для продакшена с масштабированием
-- **`docker-compose.monitoring.yml`** - для мониторинга и метрик
+- **`docker/docker-compose.dev.yml`** - для разработки с дополнительными сервисами
+- **`docker/docker-compose.prod.yml`** - для продакшена с масштабированием
+- **`docker/docker-compose.monitoring.yml`** - для мониторинга и метрик
 
 ### Переменные окружения
 
-Создайте файл `.env` в корне проекта:
+Основные переменные в `.env` файле:
 
 ```env
 # Database settings
-DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_service
-QDRANT_URL=http://localhost:6333
+DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_service
+QDRANT_URL=http://qdrant:6333
 
 # OpenRouter settings
 OPENROUTER_API_KEY=your_openrouter_api_key
@@ -375,15 +328,11 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 # JWT settings
 SECRET_KEY=your_secret_key_here_make_it_long_and_random
 
-# App settings
-DEBUG=True
-HOST=0.0.0.0
-PORT=8000
-
 # RAG settings
 EMBEDDING_MODEL=ai-forever/FRIDA
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
+DEFAULT_K_POINTS=3
 ```
 
 ## 🤝 Вклад в проект
@@ -424,9 +373,15 @@ docker compose -f docker/docker-compose.dev.yml exec rag_service_dev curl http:/
 
 # Пересборка образов
 docker compose -f docker/docker-compose.dev.yml build --no-cache
+
+# Очистка и перезапуск
+docker compose -f docker/docker-compose.dev.yml down -v
+docker compose -f docker/docker-compose.dev.yml up -d
 ```
 
-### 🔧 Решение проблем с памятью
+### 🔧 Решение проблем
+
+#### Проблемы с памятью
 
 Если возникает ошибка **"Файл подкачки слишком мал для завершения операции"**:
 
@@ -447,18 +402,34 @@ docker compose -f docker/docker-compose.dev.yml build --no-cache
    - Убедитесь, что у вас минимум 8GB свободной RAM
    - Закройте другие приложения, потребляющие много памяти
 
-4. **Альтернативные модели** (если проблема не решается):
-   - Измените `EMBEDDING_MODEL` в `.env` на `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+#### Проблемы с LLM API
+
+Если возникают ошибки от OpenRouter (503, 429 и др.):
+
+1. **Проверьте API ключ** в `.env` файле
+2. **Попробуйте другую модель** - измените `default_model` в `app/rag/llm.py`
+3. **Используйте чат без RAG** для тестирования
+4. **Проверьте статус OpenRouter** на их сайте
+
+#### Проблемы с Docker
+
+```bash
+# Очистка Docker
+docker system prune -a
+
+# Пересборка образов
+docker compose -f docker/docker-compose.dev.yml build --no-cache
+
+# Проверка логов
+docker compose -f docker/docker-compose.dev.yml logs -f
+```
 
 ## 🔄 Обновления
 
 ### Обновление зависимостей
 
 ```bash
-# Poetry
-poetry update
-
-# Docker
+# Пересборка образов
 docker compose -f docker/docker-compose.dev.yml build --no-cache
 docker compose -f docker/docker-compose.dev.yml up -d
 ```
@@ -466,10 +437,7 @@ docker compose -f docker/docker-compose.dev.yml up -d
 ### Обновление базы данных
 
 ```bash
-# Локально
-alembic upgrade head
-
-# Docker
+# Применение миграций
 docker compose -f docker/docker-compose.dev.yml exec rag_service_dev alembic upgrade head
 ```
 
