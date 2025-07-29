@@ -79,9 +79,11 @@ async def chat_with_rag(
             )
 
             if similar_docs:
+                logger.info(f"Найдены похожие документы: {len(similar_docs)}")
                 context_parts = []
                 sources = []
                 for doc_text, score, metadata in similar_docs:
+                    logger.info(f"Документ: {metadata.get('document_title', 'Unknown')}, релевантность: {score}")
                     if score > 0.7:  # Порог релевантности
                         context_parts.append(doc_text)
                         sources.append(metadata.get("document_title", "Unknown"))
