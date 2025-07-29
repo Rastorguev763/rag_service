@@ -71,10 +71,11 @@ async def chat_with_rag(
         # Получаем контекст если используется RAG
         context = None
         sources = None
+        k_points_used = 0
         if request.use_rag and rag_service:
             # Ищем похожие документы
             similar_docs = await rag_service.search_similar(
-                query=request.message, k=3, user_id=current_user.id
+                query=request.message, k=request.k_points, user_id=current_user.id
             )
 
             if similar_docs:
@@ -84,6 +85,7 @@ async def chat_with_rag(
                     if score > 0.7:  # Порог релевантности
                         context_parts.append(doc_text)
                         sources.append(metadata.get("document_title", "Unknown"))
+                        k_points_used += 1
 
                 if context_parts:
                     context = "\n\n".join(context_parts)
@@ -117,13 +119,14 @@ async def chat_with_rag(
         await db.commit()
         await db.refresh(assistant_message)
 
-        logger.info(f"Сгенерирован ответ для пользователя {current_user.username}")
+        logger.info(f"Сгенерирован ответ для пользователя {current_user.username} (использовано {k_points_used} точек контекста)")
 
         return ChatResponse(
             message=response_text,
             session_id=session.id,
             message_id=assistant_message.id,
             sources=sources,
+            k_points_used=k_points_used if request.use_rag else None,
         )
 
     except Exception as e:

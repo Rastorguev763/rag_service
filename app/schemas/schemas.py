@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator, Field
+from app.config.config import settings
 
 
 # User schemas
@@ -102,10 +103,37 @@ class ChatSession(ChatSessionBase):
 
 # Chat request/response schemas
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(
+        ..., min_length=1, max_length=10000, description="Текст сообщения пользователя"
+    )
     session_id: Optional[int] = None
     use_rag: bool = True
-    max_tokens: Optional[int] = 1000
+    max_tokens: Optional[int] = Field(default=1000, ge=1, le=4000)
+    k_points: Optional[int] = Field(
+        default=settings.default_k_points,
+        ge=1,
+        le=20,
+        description="Количество точек (чанков) для формирования контекста (1-20)",
+    )
+
+    @model_validator(mode="after")
+    def validate_parameters(self) -> "ChatRequest":
+        """Валидация параметров запроса"""
+        # Валидация k_points
+        if self.k_points is not None:
+            if self.k_points < 1:
+                self.k_points = 1
+            elif self.k_points > 20:
+                self.k_points = 20
+
+        # Валидация max_tokens
+        if self.max_tokens is not None:
+            if self.max_tokens < 1:
+                self.max_tokens = 1
+            elif self.max_tokens > 4000:
+                self.max_tokens = 4000
+
+        return self
 
 
 class ChatResponse(BaseModel):
@@ -113,6 +141,7 @@ class ChatResponse(BaseModel):
     session_id: int
     message_id: int
     sources: Optional[List[str]] = None
+    k_points_used: Optional[int] = None
 
 
 # Upload schemas

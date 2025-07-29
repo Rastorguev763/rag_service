@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
     collection_name: str = "documents"
+    default_k_points: int = 3  # Количество точек по умолчанию для RAG
 
     class Config:
         env_file = ".env"

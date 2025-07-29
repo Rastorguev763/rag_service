@@ -88,9 +88,15 @@ class QdrantVectorStore:
             for i, (text, metadata, point_id, embedding) in enumerate(
                 zip(texts, metadatas, ids, embeddings)
             ):
+                # Убеждаемся, что embedding - это список float
+                if hasattr(embedding, "tolist"):
+                    vector = embedding.tolist()
+                else:
+                    vector = embedding
+
                 point = PointStruct(
                     id=point_id,
-                    vector=embedding.tolist(),
+                    vector=vector,
                     payload={"text": text, "metadata": metadata},
                 )
                 points.append(point)

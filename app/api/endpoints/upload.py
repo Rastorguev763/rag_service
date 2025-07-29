@@ -9,7 +9,7 @@ from app.utils.auth import get_current_active_user
 from app.db.database import get_async_db
 from app.utils.logger import logger
 from app.models.models import User, Document
-from app.rag.rag_service import get_rag_service
+from app.rag.rag_service import RAGService, get_rag_service
 from app.schemas.schemas import Document as DocumentSchema
 from app.schemas.schemas import DocumentCreate, UploadResponse
 
@@ -21,11 +21,10 @@ async def upload_text_document(
     document_data: DocumentCreate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_async_db),
+    rag_service: RAGService = Depends(get_rag_service),
 ):
     """Загрузка текстового документа в RAG"""
     try:
-        rag_service = get_rag_service()
-
         # Обрабатываем документ
         document = await rag_service.process_document(
             db=db, document_data=document_data, user=current_user
@@ -55,6 +54,7 @@ async def upload_file_document(
     chunk_overlap: int = 200,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_async_db),
+    rag_service: RAGService = Depends(get_rag_service),
 ):
     """Загрузка файла в RAG"""
     try:
@@ -79,7 +79,7 @@ async def upload_file_document(
                 text_content = content.decode("latin-1")
         else:
             # Для других форматов пока возвращаем ошибку
-            # В реальном проекте здесь была бы обработка PDF/DOCX
+            # TODO: Добавить обработку PDF/DOCX
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="PDF and DOCX processing not implemented yet",
@@ -96,7 +96,6 @@ async def upload_file_document(
         )
 
         # Обрабатываем документ
-        rag_service = get_rag_service()
         document = await rag_service.process_document(
             db=db, document_data=document_data, user=current_user
         )

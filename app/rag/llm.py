@@ -13,7 +13,7 @@ class OpenRouterLLM:
         self.client = AsyncOpenAI(
             api_key=settings.openrouter_api_key, base_url=settings.openrouter_base_url
         )
-        self.default_model = "qwen/qwen3-235b-a22b-2507:free"
+        self.default_model = "deepseek/deepseek-r1-0528:free"
         logger.info("Инициализирован асинхронный OpenRouter клиент")
 
     async def generate_response(

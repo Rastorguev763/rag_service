@@ -63,7 +63,7 @@ class RAGService:
 
             # Добавляем в векторную базу
             chunk_ids = await self.vector_store.add_texts(
-                texts=chunks, metadatas=metadatas, embeddings=embeddings.tolist()
+                texts=chunks, metadatas=metadatas, embeddings=embeddings
             )
 
             # Сохраняем чанки в БД
