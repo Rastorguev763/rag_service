@@ -47,7 +47,7 @@ class RAGService:
             logger.info(f"Создано {len(chunks)} чанков")
 
             # Создаем эмбеддинги для чанков
-            embeddings = self.embedding_model.encode(chunks)
+            embeddings = await self.embedding_model.encode_async(chunks)
 
             # Подготавливаем метаданные для каждого чанка
             metadatas = []
@@ -94,7 +94,7 @@ class RAGService:
         """Поиск похожих документов"""
         try:
             # Создаем эмбеддинг для запроса
-            query_embedding = self.embedding_model.encode_single(query)
+            query_embedding = await self.embedding_model.encode_single_async(query)
 
             # Фильтр по пользователю если указан
             filter_metadata = None

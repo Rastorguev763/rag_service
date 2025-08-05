@@ -1,10 +1,12 @@
 import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.endpoints import auth, chat, status, upload
 from app.config.config import settings
+from app.rag.embedding import get_embedding_model
 from app.utils.logger import logger
 
 # Отключаем предупреждение о symlinks для Windows
@@ -18,9 +20,13 @@ async def lifespan(app: FastAPI):
     logger.info("RAG Service запущен")
     logger.info(f"Уровень логирования: {settings.log_level}")
     logger.info(f"Хост: {settings.host}:{settings.port}")
+    embedding_model = get_embedding_model()
 
     yield
 
+    # Закрываем пул потоков модели эмбеддингов
+    embedding_model.close()
+    logger.info("Пул потоков модели эмбеддингов закрыт")
     # Shutdown
     logger.info("RAG Service остановлен")
 
@@ -52,6 +58,4 @@ app.include_router(status.router, prefix="/status", tags=["status"])
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        "app.main:app", host=settings.host, port=settings.port, reload=True
-    )
+    uvicorn.run("app.main:app", host=settings.host, port=settings.port, reload=True)

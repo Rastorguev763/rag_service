@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     log_file: str = "logs/rag_service.log"
 
     # RAG settings
-    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_model: str = "ai-forever/FRIDA"
     chunk_size: int = 1000
     chunk_overlap: int = 200
     collection_name: str = "documents"

@@ -81,7 +81,7 @@ class QdrantVectorStore:
                 from app.rag.embedding import get_embedding_model
 
                 embedding_model = get_embedding_model()
-                embeddings = embedding_model.encode(texts)
+                embeddings = await embedding_model.encode_async(texts)
 
             # Создаем точки для Qdrant
             points = []
