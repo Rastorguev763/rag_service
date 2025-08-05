@@ -1,12 +1,15 @@
 from typing import Optional
 
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # Database settings
     database_url: str = "postgresql://user:password@localhost:5432/rag_service"
-    database_url_async: str = "postgresql+asyncpg://user:password@localhost:5432/rag_service"
+    database_url_async: str = (
+        "postgresql+asyncpg://user:password@localhost:5432/rag_service"
+    )
     postgres_db: str = "rag_service"
     postgres_user: str = "rag_user"
     postgres_password: str = "rag_password"
@@ -43,9 +46,9 @@ class Settings(BaseSettings):
     collection_name: str = "documents"
     default_k_points: int = 3  # Количество точек по умолчанию для RAG
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=False
+    )
 
 
 settings = Settings()

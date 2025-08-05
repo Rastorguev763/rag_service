@@ -16,7 +16,7 @@ from app.schemas.schemas import DocumentCreate, UploadResponse
 router = APIRouter()
 
 
-@router.post("/upload/text", response_model=UploadResponse)
+@router.post("/text", response_model=UploadResponse)
 async def upload_text_document(
     document_data: DocumentCreate,
     current_user: User = Depends(get_current_active_user),
@@ -46,7 +46,7 @@ async def upload_text_document(
         raise
 
 
-@router.post("/upload/file", response_model=UploadResponse)
+@router.post("/file", response_model=UploadResponse)
 async def upload_file_document(
     file: UploadFile = File(...),
     title: str = None,

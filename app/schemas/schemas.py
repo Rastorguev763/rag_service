@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, model_validator, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, model_validator, Field
 from app.config.config import settings
 
 
@@ -27,8 +27,7 @@ class User(UserBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Document schemas
@@ -59,8 +58,7 @@ class Document(DocumentBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Chat schemas
@@ -78,8 +76,7 @@ class ChatMessage(ChatMessageBase):
     session_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatSessionBase(BaseModel):
@@ -97,8 +94,7 @@ class ChatSession(ChatSessionBase):
     updated_at: Optional[datetime] = None
     messages: List[ChatMessage] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Chat request/response schemas

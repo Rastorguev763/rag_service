@@ -29,7 +29,7 @@ async def login_for_access_token(
     """Получение JWT токена для аутентификации"""
     try:
         user = await authenticate_user(db, form_data.username, form_data.password)
-        if not user:
+        if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",

@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.utils.auth import get_current_active_user
 from app.db.database import get_async_db
@@ -18,7 +18,7 @@ from app.schemas.schemas import ChatSession as ChatSessionSchema
 router = APIRouter()
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse)
 async def chat_with_rag(
     request: ChatRequest,
     current_user: User = Depends(get_current_active_user),
@@ -83,7 +83,9 @@ async def chat_with_rag(
                 context_parts = []
                 sources = []
                 for doc_text, score, metadata in similar_docs:
-                    logger.info(f"Документ: {metadata.get('document_title', 'Unknown')}, релевантность: {score}")
+                    logger.info(
+                        f"Документ: {metadata.get('document_title', 'Unknown')}, релевантность: {score}"
+                    )
                     if score > 0.7:  # Порог релевантности
                         context_parts.append(doc_text)
                         sources.append(metadata.get("document_title", "Unknown"))
@@ -121,7 +123,9 @@ async def chat_with_rag(
         await db.commit()
         await db.refresh(assistant_message)
 
-        logger.info(f"Сгенерирован ответ для пользователя {current_user.username} (использовано {k_points_used} точек контекста)")
+        logger.info(
+            f"Сгенерирован ответ для пользователя {current_user.username} (использовано {k_points_used} точек контекста)"
+        )
 
         return ChatResponse(
             message=response_text,
@@ -218,7 +222,6 @@ async def delete_chat_session(
             )
 
         # Удаляем все сообщения сессии
-        from sqlalchemy import delete
 
         await db.execute(
             delete(ChatMessage).filter(ChatMessage.session_id == session_id)
