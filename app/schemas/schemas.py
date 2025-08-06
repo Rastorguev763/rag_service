@@ -104,7 +104,7 @@ class ChatRequest(BaseModel):
     )
     session_id: Optional[int] = None
     use_rag: bool = True
-    max_tokens: Optional[int] = Field(default=1000, ge=1, le=4000)
+    max_tokens: Optional[int] = Field(default=5000, ge=1, le=9000)
     k_points: Optional[int] = Field(
         default=settings.default_k_points,
         ge=1,
@@ -126,8 +126,8 @@ class ChatRequest(BaseModel):
         if self.max_tokens is not None:
             if self.max_tokens < 1:
                 self.max_tokens = 1
-            elif self.max_tokens > 4000:
-                self.max_tokens = 4000
+            elif self.max_tokens > 9000:
+                self.max_tokens = 9000
 
         return self
 

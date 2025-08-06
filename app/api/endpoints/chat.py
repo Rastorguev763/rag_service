@@ -2,18 +2,18 @@ import traceback
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
 
-from app.utils.auth import get_current_active_user
 from app.db.database import get_async_db
-from app.utils.logger import logger
 from app.models.models import ChatMessage, ChatSession, User
 from app.rag.llm import OpenRouterLLM, get_llm
-from app.rag.rag_service import get_rag_service
+from app.rag.rag_service import RAGService, get_rag_service
 from app.schemas.schemas import ChatMessage as ChatMessageSchema
 from app.schemas.schemas import ChatRequest, ChatResponse
 from app.schemas.schemas import ChatSession as ChatSessionSchema
+from app.utils.auth import get_current_active_user
+from app.utils.logger import logger
 
 router = APIRouter()
 
@@ -24,13 +24,10 @@ async def chat_with_rag(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_async_db),
     llm: OpenRouterLLM = Depends(get_llm),
+    rag_service: RAGService = Depends(get_rag_service),
 ):
     """Основной endpoint для чата с RAG"""
     try:
-        # Инициализируем RAG сервис только если он нужен
-        rag_service = None
-        if request.use_rag:
-            rag_service = get_rag_service()
 
         # Получаем или создаем сессию чата
         if request.session_id:
@@ -60,7 +57,7 @@ async def chat_with_rag(
             await db.commit()
             await db.refresh(session)
 
-        # Сохраняем сообщение пользователя
+        # Сохраняем сообщение пользователя в БД
         user_message = ChatMessage(
             content=request.message, role="user", session_id=session.id
         )
@@ -68,33 +65,76 @@ async def chat_with_rag(
         await db.commit()
         await db.refresh(user_message)
 
+        # Сохраняем сообщение пользователя в персональную коллекцию Qdrant
+        try:
+            message_metadata = {
+                "session_id": session.id,
+                "message_id": user_message.id,
+                "role": "user",
+                "content_type": "chat_message",
+            }
+            await rag_service.add_user_message(
+                user_id=current_user.id,
+                message_text=request.message,
+                metadata=message_metadata,
+            )
+            logger.info(
+                f"Сообщение пользователя {current_user.id} сохранено в персональную коллекцию"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении сообщения в коллекцию: {e}")
+            # Не прерываем чат, если не удалось сохранить в коллекцию
+
         # Получаем контекст если используется RAG
         context = None
         sources = None
         k_points_used = 0
-        if request.use_rag and rag_service:
-            # Ищем похожие документы
-            similar_docs = await rag_service.search_similar(
-                query=request.message, k=request.k_points, user_id=current_user.id
+        if request.use_rag:
+            # Используем гибридный поиск по документам и сообщениям пользователя
+            similar_docs = await rag_service.search_hybrid(
+                query=request.message,
+                k=request.k_points,
+                user_id=current_user.id,
+                user_messages_weight=0.3,  # 30% веса для сообщений пользователя
+                documents_weight=0.7,  # 70% веса для документов
             )
 
             if similar_docs:
-                logger.info(f"Найдены похожие документы: {len(similar_docs)}")
+                logger.info(
+                    f"Найдены похожие документы и сообщения: {len(similar_docs)}"
+                )
                 context_parts = []
                 sources = []
                 for doc_text, score, metadata in similar_docs:
+                    content_type = metadata.get("content_type", "unknown")
+                    if content_type == "document_chunk":
+                        source_name = metadata.get("document_title", "Unknown Document")
+                    elif content_type == "chat_message":
+                        source_name = f"Previous Message (Session {metadata.get('session_id', 'Unknown')})"
+                    else:
+                        source_name = "Unknown Source"
+
                     logger.info(
-                        f"Документ: {metadata.get('document_title', 'Unknown')}, релевантность: {score}"
+                        f"Источник: {source_name}, тип: {content_type}, релевантность: {score}"
                     )
-                    if score > 0.7:  # Порог релевантности
+                    if score > 0.6:  # Снижаем порог релевантности для гибридного поиска
                         context_parts.append(doc_text)
-                        sources.append(metadata.get("document_title", "Unknown"))
+                        sources.append(source_name)
                         k_points_used += 1
 
                 if context_parts:
                     context = "\n\n".join(context_parts)
+                    logger.info(
+                        f"Сформирован контекст для LLM ({len(context)} символов):"
+                    )
+                    context_for_logging = (
+                        context[:500] + "..." if len(context) > 500 else context
+                    )
+                    logger.info(f"Контекст:\n{context_for_logging}")
+                else:
+                    logger.info("Контекст не сформирован - нет релевантных документов")
         else:
-            logger.info(f"RAG не используется {request.use_rag=} - {rag_service=}")
+            logger.info("RAG не используется")
 
         # Получаем историю сообщений для контекста
         conversation_history = []
@@ -106,6 +146,12 @@ async def chat_with_rag(
             for msg in session.messages[-10:]:  # Последние 10 сообщений
                 conversation_history.append({"role": msg.role, "content": msg.content})
 
+            logger.info(
+                f"Загружена история сообщений: {len(conversation_history)} сообщений"
+            )
+        else:
+            logger.info("История сообщений пуста")
+
         # Генерируем ответ
         response_text = await llm.chat_completion(
             user_message=request.message,
@@ -115,13 +161,32 @@ async def chat_with_rag(
             max_tokens=request.max_tokens,
         )
 
-        # Сохраняем ответ ассистента
+        # Сохраняем ответ ассистента в БД
         assistant_message = ChatMessage(
             content=response_text, role="assistant", session_id=session.id
         )
         db.add(assistant_message)
         await db.commit()
         await db.refresh(assistant_message)
+
+        # Сохраняем ответ ассистента в персональную коллекцию пользователя
+        try:
+            assistant_metadata = {
+                "session_id": session.id,
+                "message_id": assistant_message.id,
+                "role": "assistant",
+                "content_type": "chat_message",
+            }
+            await rag_service.add_user_message(
+                user_id=current_user.id,
+                message_text=response_text,
+                metadata=assistant_metadata,
+            )
+            logger.info(
+                f"Ответ ассистента для пользователя {current_user.id} сохранен в персональную коллекцию"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении ответа ассистента в коллекцию: {e}")
 
         logger.info(
             f"Сгенерирован ответ для пользователя {current_user.username} (использовано {k_points_used} точек контекста)"
@@ -237,4 +302,18 @@ async def delete_chat_session(
     except Exception as e:
         logger.error(f"Ошибка при удалении сессии: {e}")
         await db.rollback()
+        raise
+
+
+@router.get("/collection-info")
+async def get_user_collection_info(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Получение информации о персональной коллекции пользователя"""
+    try:
+        rag_service = get_rag_service()
+        collection_info = await rag_service.get_user_collection_info(current_user.id)
+        return collection_info
+    except Exception as e:
+        logger.error(f"Ошибка при получении информации о коллекции: {e}")
         raise

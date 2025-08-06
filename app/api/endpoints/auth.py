@@ -3,28 +3,31 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.config import settings
+from app.db.database import get_async_db
+from app.models.models import User
+from app.rag.rag_service import RAGService, get_rag_service
+from app.rag.vectorstore import QdrantVectorStore, get_vector_store
+from app.schemas.schemas import Token
+from app.schemas.schemas import User as UserSchema
+from app.schemas.schemas import UserCreate
 from app.utils.auth import (
     authenticate_user,
     create_access_token,
     get_current_active_user,
 )
-from app.config.config import settings
-from app.db.database import get_async_db
 from app.utils.logger import logger
-from app.models.models import User
-from app.schemas.schemas import Token
-from app.schemas.schemas import User as UserSchema
-from app.schemas.schemas import UserCreate
 
 router = APIRouter()
 
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_async_db)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """Получение JWT токена для аутентификации"""
     try:
@@ -50,13 +53,17 @@ async def login_for_access_token(
 
 
 @router.post("/register", response_model=UserSchema)
-async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_async_db)):
+async def register_user(
+    user_data: UserCreate, db: AsyncSession = Depends(get_async_db)
+):
     """Регистрация нового пользователя"""
     try:
         from app.utils.auth import get_password_hash
 
         # Проверяем, что пользователь не существует
-        result = await db.execute(select(User).filter(User.username == user_data.username))
+        result = await db.execute(
+            select(User).filter(User.username == user_data.username)
+        )
         existing_user = result.scalar_one_or_none()
         if existing_user:
             raise HTTPException(
@@ -84,6 +91,18 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_as
         await db.commit()
         await db.refresh(user)
 
+        # Создаем персональную коллекцию в Qdrant для нового пользователя
+        try:
+            vector_store = get_vector_store()
+            await vector_store.create_user_collection(user.id)
+            logger.info(f"Создана персональная коллекция для пользователя {user.id}")
+        except Exception as e:
+            logger.error(
+                f"Ошибка при создании коллекции для пользователя {user.id}: {e}"
+            )
+            # Не прерываем регистрацию, если не удалось создать коллекцию
+            # Пользователь все равно будет зарегистрирован
+
         logger.info(f"Зарегистрирован новый пользователь: {user.username}")
         return user
 
@@ -97,3 +116,53 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_as
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Получение информации о текущем пользователе"""
     return current_user
+
+
+@router.get("/me/collection-info")
+async def get_user_collection_info(
+    current_user: User = Depends(get_current_active_user),
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Получение информации о персональной коллекции пользователя"""
+    try:
+        collection_info = await rag_service.get_user_collection_info(current_user.id)
+        return {
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "collection_info": collection_info,
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при получении информации о коллекции: {e}")
+        raise
+
+
+@router.delete("/me")
+async def delete_user_account(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_async_db),
+    vector_store: QdrantVectorStore = Depends(get_vector_store),
+):
+    """Удаление аккаунта пользователя и его персональной коллекции"""
+    try:
+        user_id = current_user.id
+        username = current_user.username
+        # TODO: Вынести в QdrantVectorStore отдельный метод для удаления коллекции
+        # Удаляем персональную коллекцию пользователя
+        try:
+            await vector_store.delete_user_collection(user_id)
+            logger.info(f"Удалена персональная коллекция пользователя {user_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при удалении коллекции пользователя {user_id}: {e}")
+            # Продолжаем удаление пользователя даже если не удалось удалить коллекцию
+
+        # Удаляем пользователя из базы данных
+        await db.delete(current_user)
+        await db.commit()
+
+        logger.info(f"Удален аккаунт пользователя: {username}")
+        return {"message": "Аккаунт успешно удален"}
+
+    except Exception as e:
+        logger.error(f"Ошибка при удалении аккаунта: {e}")
+        await db.rollback()
+        raise

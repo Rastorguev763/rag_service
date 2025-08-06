@@ -1,15 +1,15 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.utils.logger import logger
 from app.models.models import Document, DocumentChunk, User
 from app.rag.embedding import get_embedding_model
 from app.rag.text_splitter import get_text_splitter
 from app.rag.vectorstore import get_vector_store
 from app.schemas.schemas import DocumentCreate, RAGStatus
+from app.utils.logger import logger
 
 
 class RAGService:
@@ -57,11 +57,12 @@ class RAGService:
                     "document_title": document.title,
                     "chunk_index": i,
                     "user_id": user.id,
+                    "content_type": "document_chunk",
                     "created_at": datetime.now(UTC).isoformat(),
                 }
                 metadatas.append(metadata)
 
-            # Добавляем в векторную базу
+            # Добавляем в векторную базу (в общую коллекцию документов)
             chunk_ids = await self.vector_store.add_texts(
                 texts=chunks, metadatas=metadatas, embeddings=embeddings
             )
@@ -88,23 +89,52 @@ class RAGService:
             await db.rollback()
             raise
 
+    async def add_user_message(
+        self, user_id: int, message_text: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Добавление сообщения пользователя в его персональную коллекцию"""
+        try:
+            # Добавляем сообщение в персональную коллекцию пользователя
+            message_id = await self.vector_store.add_user_message(
+                user_id=user_id, message_text=message_text, metadata=metadata
+            )
+
+            logger.info(
+                f"Добавлено сообщение пользователя {user_id} в персональную коллекцию"
+            )
+            return message_id
+
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении сообщения пользователя: {e}")
+            raise
+
     async def search_similar(
-        self, query: str, k: int = 5, user_id: Optional[int] = None
+        self,
+        query: str,
+        k: int = 5,
+        user_id: Optional[int] = None,
+        search_user_messages: bool = False,
     ) -> List[Tuple[str, float, Dict[str, Any]]]:
         """Поиск похожих документов"""
         try:
             # Создаем эмбеддинг для запроса
             query_embedding = await self.embedding_model.encode_single_async(query)
 
-            # Фильтр по пользователю если указан
-            filter_metadata = None
-            if user_id:
-                filter_metadata = {"user_id": user_id}
+            if search_user_messages and user_id:
+                # Поиск в персональной коллекции пользователя
+                results = await self.vector_store.search_user_messages(
+                    user_id=user_id, query=query_embedding, k=k
+                )
+            else:
+                # Фильтр по пользователю если указан
+                filter_metadata = None
+                if user_id:
+                    filter_metadata = {"user_id": user_id}
 
-            # Ищем похожие документы
-            results = await self.vector_store.similarity_search(
-                query=query_embedding, k=k, filter_metadata=filter_metadata
-            )
+                # Ищем похожие документы в общей коллекции
+                results = await self.vector_store.similarity_search(
+                    query=query_embedding, k=k, filter_metadata=filter_metadata
+                )
 
             logger.debug(f"Найдено {len(results)} похожих документов")
             return results
@@ -113,24 +143,118 @@ class RAGService:
             logger.error(f"Ошибка при поиске: {e}")
             raise
 
-    async def get_rag_status(self, db: AsyncSession) -> RAGStatus:
+    async def search_hybrid(
+        self,
+        query: str,
+        k: int = 5,
+        user_id: Optional[int] = None,
+        user_messages_weight: float = 0.3,
+        documents_weight: float = 0.7,
+    ) -> List[Tuple[str, float, Dict[str, Any]]]:
+        """Гибридный поиск по документам и сообщениям пользователя"""
+        try:
+            if not user_id:
+                # Если пользователь не указан, ищем только в документах
+                return await self.search_similar(
+                    query, k, user_id, search_user_messages=False
+                )
+
+            # Создаем эмбеддинг для запроса
+            query_embedding = await self.embedding_model.encode_single_async(query)
+
+            # Поиск в документах пользователя
+            document_k = max(1, int(k * documents_weight))
+            document_results = await self.vector_store.similarity_search(
+                query=query_embedding,
+                k=document_k,
+                filter_metadata={"user_id": user_id, "content_type": "document_chunk"},
+            )
+
+            # Поиск в сообщениях пользователя
+            message_k = max(1, int(k * user_messages_weight))
+            message_results = await self.vector_store.search_user_messages(
+                user_id=user_id, query=query_embedding, k=message_k
+            )
+
+            # Объединяем и сортируем результаты
+            all_results = []
+
+            # Добавляем результаты документов с весовым коэффициентом
+            for text, score, metadata in document_results:
+                all_results.append((text, score * documents_weight, metadata))
+
+            # Добавляем результаты сообщений с весовым коэффициентом
+            for text, score, metadata in message_results:
+                all_results.append((text, score * user_messages_weight, metadata))
+
+            # Сортируем по релевантности и берем топ k
+            all_results.sort(key=lambda x: x[1], reverse=True)
+            final_results = all_results[:k]
+
+            logger.debug(f"Гибридный поиск: найдено {len(final_results)} результатов")
+            return final_results
+
+        except Exception as e:
+            logger.error(f"Ошибка при гибридном поиске: {e}")
+            raise
+
+    async def get_user_collection_info(self, user_id: int) -> Dict[str, Any]:
+        """Получение информации о персональной коллекции пользователя"""
+        try:
+            collection_info = await self.vector_store.get_user_collection_info(user_id)
+            return collection_info
+        except Exception as e:
+            logger.error(
+                f"Ошибка при получении информации о коллекции пользователя: {e}"
+            )
+            raise
+
+    async def get_rag_status(
+        self, db: AsyncSession, user_id: Optional[int] = None
+    ) -> RAGStatus:
         """Получение статуса RAG системы"""
         try:
             # Статистика из PostgreSQL
-            result = await db.execute(select(Document))
-            total_documents = len(result.scalars().all())
+            if user_id:
+                result = await db.execute(
+                    select(Document).filter(Document.owner_id == user_id)
+                )
+                total_documents = len(result.scalars().all())
 
-            result = await db.execute(
-                select(Document).filter(Document.is_processed.is_(True))
-            )
-            processed_documents = len(result.scalars().all())
+                result = await db.execute(
+                    select(Document).filter(
+                        Document.owner_id == user_id, Document.is_processed.is_(True)
+                    )
+                )
+                processed_documents = len(result.scalars().all())
 
-            result = await db.execute(select(DocumentChunk))
-            total_chunks = len(result.scalars().all())
+                result = await db.execute(
+                    select(DocumentChunk)
+                    .join(Document)
+                    .filter(Document.owner_id == user_id)
+                )
+                total_chunks = len(result.scalars().all())
+            else:
+                result = await db.execute(select(Document))
+                total_documents = len(result.scalars().all())
+
+                result = await db.execute(
+                    select(Document).filter(Document.is_processed.is_(True))
+                )
+                processed_documents = len(result.scalars().all())
+
+                result = await db.execute(select(DocumentChunk))
+                total_chunks = len(result.scalars().all())
 
             # Статистика из Qdrant
-            collection_info = await self.vector_store.get_collection_info()
-            collection_size = collection_info.get("points_count", 0)
+            if user_id:
+                collection_info = await self.vector_store.get_user_collection_info(
+                    user_id
+                )
+                collection_size = collection_info.get("points_count", 0)
+            else:
+                collection_info = await self.vector_store.get_collection_info()
+                collection_size = collection_info.get("points_count", 0)
 
             # Проверка здоровья системы
             is_healthy = (
@@ -189,6 +313,30 @@ class RAGService:
         except Exception as e:
             logger.error(f"Ошибка при удалении документа: {e}")
             await db.rollback()
+            raise
+
+    async def clear_user_data(self, user_id: int, db: AsyncSession) -> bool:
+        """Очистка всех данных пользователя"""
+        try:
+            # Удаляем все документы пользователя
+            result = await db.execute(
+                select(Document).filter(Document.owner_id == user_id)
+            )
+            user_documents = result.scalars().all()
+
+            for document in user_documents:
+                await self.delete_document(
+                    db, document.id, User(id=user_id, username="temp")
+                )
+
+            # Удаляем персональную коллекцию пользователя
+            await self.vector_store.delete_user_collection(user_id)
+
+            logger.info(f"Очищены все данные пользователя {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Ошибка при очистке данных пользователя: {e}")
             raise
 
 
